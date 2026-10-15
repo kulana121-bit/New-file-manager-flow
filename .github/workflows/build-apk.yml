@@ -58,10 +58,14 @@ jobs:
             fi
           fi
           echo "Configuring Android SDK at: $SDK_DIR"
+          sudo chown -R $USER:$USER "$SDK_DIR" 2>/dev/null || true
+          chmod -R u+rwX "$SDK_DIR" 2>/dev/null || true
+
           export ANDROID_HOME="$SDK_DIR"
           export ANDROID_SDK_ROOT="$SDK_DIR"
           echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "sdk.dir=$SDK_DIR" > local.properties
 
           # 1. Accept all Android SDK licenses
           mkdir -p "$SDK_DIR/licenses"
@@ -73,6 +77,9 @@ jobs:
             "84831b9409646a918e30573bab4c9c91346d8abd" \
             "7912072 residency" \
             > "$SDK_DIR/licenses/android-sdk-preview-license"
+          printf '%s\n' "859f317696f67ef3d7f30a50a5560e7834b43903" > "$SDK_DIR/licenses/android-sdk-arm-dbt-license"
+          printf '%s\n' "33b6a2b64607f11b759f320ef9dff4ae5c47d97a" > "$SDK_DIR/licenses/google-gdk-license"
+          printf '%s\n' "e9acab5b5fbb560a72cfaecce8946896ff6aab9d" > "$SDK_DIR/licenses/mips-android-sysimage-license"
 
           if [ -x "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" ]; then
             yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --licenses 2>/dev/null || true
@@ -109,6 +116,7 @@ jobs:
                 "Layoutlib.Revision=1" \
                 "Platform.MinToolsRev=22" \
                 > "$SDK_DIR/platforms/android-36/source.properties"
+              sed -i 's/platforms;android-[0-9]*/platforms;android-36/g' "$SDK_DIR/platforms/android-36/package.xml" 2>/dev/null || true
             fi
 
             # Ensure android-36.1 exists (required by compileSdk release(36) minorApiLevel 1)
@@ -128,6 +136,7 @@ jobs:
                 "Layoutlib.Revision=1" \
                 "Platform.MinToolsRev=22" \
                 > "$SDK_DIR/platforms/android-36.1/source.properties"
+              sed -i 's/platforms;android-[0-9]*/platforms;android-36.1/g' "$SDK_DIR/platforms/android-36.1/package.xml" 2>/dev/null || true
             fi
           fi
 

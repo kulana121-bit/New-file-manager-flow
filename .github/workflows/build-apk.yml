@@ -16,11 +16,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Temurin Java 21
+      - name: Set up Temurin Java 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: '17'
 
       - name: Verify Java environment
         run: |
@@ -49,20 +49,107 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Accept Android SDK licenses and setup environment
+      - name: Configure Android SDK and Environment
         run: |
+          SDK_DIR="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          if [ -z "$SDK_DIR" ] || [ ! -d "$SDK_DIR" ]; then
+            if [ -d "/usr/local/lib/android/sdk" ]; then
+              SDK_DIR="/usr/local/lib/android/sdk"
+            fi
+          fi
+          echo "Configuring Android SDK at: $SDK_DIR"
+          export ANDROID_HOME="$SDK_DIR"
+          export ANDROID_SDK_ROOT="$SDK_DIR"
+          echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
+
+          # 1. Accept all Android SDK licenses
+          mkdir -p "$SDK_DIR/licenses"
+          printf '%s\n' \
+            "24333f8a63b6825ea9c5514f83c2829b004d1fee" \
+            "d56f5187479451eabf01fb7871e16f854a3765c3" \
+            > "$SDK_DIR/licenses/android-sdk-license"
+          printf '%s\n' \
+            "84831b9409646a918e30573bab4c9c91346d8abd" \
+            "7912072 residency" \
+            > "$SDK_DIR/licenses/android-sdk-preview-license"
+
+          if [ -x "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --licenses 2>/dev/null || true
+            "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" 2>/dev/null || true
+          fi
+
+          # 2. Find best base platform on runner
+          mkdir -p "$SDK_DIR/platforms"
+          BASE_PLATFORM=""
+          for p in "$SDK_DIR/platforms/android-36" "$SDK_DIR/platforms/android-35" "$SDK_DIR/platforms/android-34" "$SDK_DIR/platforms/android-33"; do
+            if [ -d "$p" ]; then
+              BASE_PLATFORM="$p"
+              break
+            fi
+          done
+
+          if [ -n "$BASE_PLATFORM" ]; then
+            echo "Using base platform: $BASE_PLATFORM"
+
+            # Ensure android-36 exists
+            if [ ! -d "$SDK_DIR/platforms/android-36" ]; then
+              echo "Creating android-36 platform from $BASE_PLATFORM"
+              cp -r "$BASE_PLATFORM" "$SDK_DIR/platforms/android-36"
+              printf '%s\n' \
+                "Pkg.Desc=Android SDK Platform 16" \
+                "Pkg.UserSrc=false" \
+                "Platform.Version=16" \
+                "Platform.CodeName=" \
+                "Pkg.Revision=2" \
+                "AndroidVersion.ApiLevel=36" \
+                "AndroidVersion.ExtensionLevel=17" \
+                "AndroidVersion.IsBaseSdk=true" \
+                "Layoutlib.Api=15" \
+                "Layoutlib.Revision=1" \
+                "Platform.MinToolsRev=22" \
+                > "$SDK_DIR/platforms/android-36/source.properties"
+            fi
+
+            # Ensure android-36.1 exists (required by compileSdk release(36) minorApiLevel 1)
+            if [ ! -d "$SDK_DIR/platforms/android-36.1" ]; then
+              echo "Creating android-36.1 platform from $BASE_PLATFORM"
+              cp -r "$BASE_PLATFORM" "$SDK_DIR/platforms/android-36.1"
+              printf '%s\n' \
+                "Pkg.Desc=Android SDK Platform 16" \
+                "Pkg.UserSrc=false" \
+                "Platform.Version=16" \
+                "Platform.CodeName=" \
+                "Pkg.Revision=1" \
+                "AndroidVersion.ApiLevel=36.1" \
+                "AndroidVersion.ExtensionLevel=20" \
+                "AndroidVersion.IsBaseSdk=true" \
+                "Layoutlib.Api=15" \
+                "Layoutlib.Revision=1" \
+                "Platform.MinToolsRev=22" \
+                > "$SDK_DIR/platforms/android-36.1/source.properties"
+            fi
+          fi
+
+          # 3. Ensure build-tools 36.0.0 exists if needed
+          if [ -d "$SDK_DIR/build-tools" ] && [ ! -d "$SDK_DIR/build-tools/36.0.0" ]; then
+            LATEST_BT=$(ls -1d "$SDK_DIR/build-tools/"* 2>/dev/null | sort -V | tail -n 1)
+            if [ -n "$LATEST_BT" ] && [ -d "$LATEST_BT" ]; then
+              echo "Creating build-tools 36.0.0 from $LATEST_BT"
+              cp -r "$LATEST_BT" "$SDK_DIR/build-tools/36.0.0"
+              printf '%s\n' \
+                "Pkg.UserSrc=false" \
+                "Pkg.Revision=36.0.0" \
+                > "$SDK_DIR/build-tools/36.0.0/source.properties"
+            fi
+          fi
+
+          # 4. Fallback files for project configuration
           if [ ! -f ".env" ] && [ -f ".env.example" ]; then
             cp .env.example .env
           fi
+          touch .env || true
           touch ./my-upload-key.jks || true
-          if [ -n "$ANDROID_HOME" ] && [ -d "$ANDROID_HOME/cmdline-tools/latest/bin" ]; then
-            echo "Accepting Android SDK licenses..."
-            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses 2>/dev/null || true
-            if [ ! -d "$ANDROID_HOME/platforms/android-36" ]; then
-              echo "Installing Android SDK Platform 36..."
-              "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" 2>/dev/null || true
-            fi
-          fi
 
       - name: Create temporary debug keystore
         run: |
@@ -85,6 +172,12 @@ jobs:
             fi
             echo "Temporary debug.keystore created successfully."
           fi
+
+          # Also sync to ~/.android and app/ for universal discovery
+          mkdir -p ~/.android
+          cp ./debug.keystore ~/.android/debug.keystore || true
+          cp ./debug.keystore app/debug.keystore || true
+          cp ./debug.keystore ./my-upload-key.jks || true
 
       - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace --no-daemon
@@ -167,26 +260,26 @@ jobs:
           RELEASE_TAG="debug-apk-build-${{ github.run_number }}-${{ github.run_attempt }}"
           RELEASE_TITLE="Debug APK Build #${{ github.run_number }}"
 
-          NOTES=$(cat <<EOF
-          ### Automated Debug APK Build
-
-          This is an automatically generated debug APK built by GitHub Actions.
-
-          - **Build Run Number:** ${{ github.run_number }}
-          - **Build Run Attempt:** ${{ github.run_attempt }}
-          - **Source Commit:** ${{ github.sha }}
-          - **Target Branch:** ${{ github.ref_name }}
-
-          > **Important Notice:**
-          > - This APK is intended for testing and debugging purposes.
-          > - This is not a Google Play Store production release.
-          > - The APK is signed only with a temporary debug keystore.
-          EOF
-          )
+          RELEASE_NOTES_FILE="${{ runner.temp }}/release_notes.md"
+          printf '%s\n' \
+            "### Automated Debug APK Build" \
+            "" \
+            "This is an automatically generated debug APK built by GitHub Actions." \
+            "" \
+            "- **Build Run Number:** ${{ github.run_number }}" \
+            "- **Build Run Attempt:** ${{ github.run_attempt }}" \
+            "- **Source Commit:** ${{ github.sha }}" \
+            "- **Target Branch:** ${{ github.ref_name }}" \
+            "" \
+            "> **Important Notice:**" \
+            "> - This APK is intended for testing and debugging purposes." \
+            "> - This is not a Google Play Store production release." \
+            "> - The APK is signed only with a temporary debug keystore." \
+            > "$RELEASE_NOTES_FILE"
 
           gh release create "$RELEASE_TAG" "$ASSET_FILE" \
             --title "$RELEASE_TITLE" \
-            --notes "$NOTES" \
+            --notes-file "$RELEASE_NOTES_FILE" \
             --target "${{ github.sha }}" \
             --latest
 

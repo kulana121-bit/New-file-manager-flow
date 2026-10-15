@@ -1,0 +1,6 @@
+{
+  "name": "FileFlow",
+  "description": "Advanced File & Archive Manager with Scoped Storage, ZIP compression, Media & Document viewers, and Safe Vault.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
